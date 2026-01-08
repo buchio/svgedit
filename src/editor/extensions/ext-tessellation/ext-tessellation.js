@@ -187,14 +187,54 @@ export default {
         }
 
         // Listen for mode changes 
-        // Note: SVG-Edit usually fires 'selected' or updates UI, but we can hook into mode changes via mouse events or better, a custom listener if possible.
-        // Or we just check in our mouse handlers, but that doesn't hide it if we switch AWAY.
-        // We'll trust the extension mechanism or add a global listener if needed.
-        // EditorStartup adds 'modeChange' to document.
         document.addEventListener('modeChange', (e) => {
-            // e.detail might contain the mode, or we check svgCanvas
-            // Wait a tick for mode to update?
             setTimeout(updatePanelVisibility, 10)
+        })
+
+        // Capture drawn elements into Master Group
+        // SVG-Edit typically dispatches 'drawn' or 'selected' events via svgCanvas.bind
+        // However, we can hook into the global or svgCanvas events if available.
+        // A robust way in v7 extension is to use the callback in addExtension if it supports event hooks,
+        // or just bind to existing ones.
+        // Let's assume typical 'bind' availability or use a dirty check.
+        // Actually, svgCanvas.bind('drawn', handler) is standard.
+
+        svgCanvas.bind('drawn', (e) => {
+            if (svgCanvas.getMode() !== 'tessellation') return
+
+            const element = e.elem || e
+            if (!element) return
+
+            // Move into master group
+            const svgContent = svgCanvas.getSvgContent()
+            const masterGroup = svgContent.querySelector('#tessellation-master-group')
+
+            if (masterGroup && element.parentNode !== masterGroup) {
+                // We need to preserve visual size.
+                // Master group has transform="scale(50)".
+                // We must scale the element by 1/50 = 0.02 to keep it looking the same.
+
+                // Get current transform or create one
+                // SVGElements have transform list.
+                // valid approach: element.setAttribute('transform', 'scale(0.02)')
+                // But we should append to existing transform?
+                // For simplicity, just set/prepend.
+
+                const currentTransform = element.getAttribute('transform') || ''
+                // Prepend scaling
+                element.setAttribute('transform', 'scale(0.02) ' + currentTransform)
+
+                // Also stroke-width needs to be scaled DOWN? 
+                // If we scale the element geometry by 0.02, the stroke width scales too?
+                // Wait. transform="scale(0.02)" on the group/element affects everything.
+                // If stroke-width was "1", it becomes "0.02" visually.
+                // BUT the MasterGroup is scaled x50.
+                // So 0.02 * 50 = 1.
+                // So visually stroke width remains correct!
+
+                masterGroup.appendChild(element)
+                console.log('Moved element to master group with scale compensation')
+            }
         })
 
         setTimeout(setupOverlay, 500)
@@ -203,36 +243,87 @@ export default {
         const generateTiles = () => {
             const svgContent = svgCanvas.getSvgContent()
             const currentDrawing = svgCanvas.getCurrentDrawing()
+            const currentLayer = currentDrawing.getCurrentLayer()
 
             let defs = svgCanvas.findDefs()
+
+            // 1. Setup Prototile (Clipping Path)
             let prototile = defs.querySelector('#tessellation-prototile')
             if (!prototile) {
                 prototile = document.createElementNS(svgCanvas.NS.SVG, 'path')
                 prototile.id = 'tessellation-prototile'
                 defs.appendChild(prototile)
             }
-
             const d = tilingManager.getPrototilePath()
             prototile.setAttribute('d', d)
-            // prototile.setAttribute('fill', 'currentColor') // Removed to allow <use> elements to apply fill
 
-            let group = svgContent.querySelector('#tessellation-group')
-            if (!group) {
-                group = document.createElementNS(svgCanvas.NS.SVG, 'g')
-                group.id = 'tessellation-group'
-                group.setAttribute('fill', 'none')
-                group.setAttribute('stroke', '#000')
-                group.setAttribute('stroke-width', '0.02')
+            let clipPath = defs.querySelector('#tessellation-clip')
+            if (!clipPath) {
+                clipPath = document.createElementNS(svgCanvas.NS.SVG, 'clipPath')
+                clipPath.id = 'tessellation-clip'
+                const useProto = document.createElementNS(svgCanvas.NS.SVG, 'use')
+                useProto.setAttributeNS(svgCanvas.NS.XLINK, 'xlink:href', '#tessellation-prototile')
+                useProto.setAttribute('href', '#tessellation-prototile')
+                clipPath.appendChild(useProto)
+                defs.appendChild(clipPath)
+            }
 
-                // Append to current layer
-                const currentLayer = currentDrawing.getCurrentLayer()
-                currentLayer.appendChild(group)
+            // 2. Setup Master Group (User edits this)
+            // We want this to be the "active" drawing target if possible, or we move drawn elements here.
+            let masterGroup = svgContent.querySelector('#tessellation-master-group')
+            if (!masterGroup) {
+                masterGroup = document.createElementNS(svgCanvas.NS.SVG, 'g')
+                masterGroup.id = 'tessellation-master-group'
+                masterGroup.setAttribute('clip-path', 'url(#tessellation-clip)')
+
+                // Add a visual boundary for the user
+                const boundary = document.createElementNS(svgCanvas.NS.SVG, 'use')
+                boundary.setAttributeNS(svgCanvas.NS.XLINK, 'xlink:href', '#tessellation-prototile')
+                boundary.setAttribute('href', '#tessellation-prototile')
+                boundary.setAttribute('fill', 'none')
+                boundary.setAttribute('stroke', '#ff0000') // Red outline for editing area
+                boundary.setAttribute('stroke-width', '1')
+                boundary.setAttribute('stroke-dasharray', '5,5')
+                boundary.id = 'tessellation-boundary'
+                masterGroup.appendChild(boundary)
+
+                // Master group should be on top so user can interact
+                currentLayer.appendChild(masterGroup)
+            }
+            // Ensure boundary matches current shape
+            const boundary = masterGroup.querySelector('#tessellation-boundary')
+            if (boundary) {
+                // boundary logic already handled by referencing static prototile id, but prototile path updated above
+            }
+
+            // 3. Setup Background Group (Reflections)
+            let bgGroup = svgContent.querySelector('#tessellation-bg-group')
+            if (!bgGroup) {
+                bgGroup = document.createElementNS(svgCanvas.NS.SVG, 'g')
+                bgGroup.id = 'tessellation-bg-group'
+                bgGroup.style.pointerEvents = 'none' // Non-interactive background
+                // Insert before master group so it's behind
+                currentLayer.insertBefore(bgGroup, masterGroup)
             } else {
-                while (group.firstChild) {
-                    group.removeChild(group.firstChild)
+                while (bgGroup.firstChild) {
+                    bgGroup.removeChild(bgGroup.firstChild)
                 }
             }
-            group.setAttribute('transform', 'scale(' + TILE_SCALE + ')')
+            bgGroup.setAttribute('transform', 'scale(' + TILE_SCALE + ')')
+
+            // Scale Master Group too?
+            // Yes, user draws in scaled units? Or unscaled?
+            // If TILE_SCALE is 50, coordinates are small.
+            // Let's keep Master Group SCALED so user draws in "screen" pixels roughly?
+            // Wait, if Master Group is scaled, <use> refs will be double scaled if we put them in a scaled group?
+            // B) Master Group is trasnformed by scale(50). User draws inside.
+
+            masterGroup.setAttribute('transform', 'scale(' + TILE_SCALE + ')')
+            // Complex decision: 
+            // A) Master Group is at scale 1. Tiles are scaled by 50. This means Master Group elements will be HUGE relative to tile.
+            // B) Master Group is trasnformed by scale(50). User draws inside.
+
+            masterGroup.setAttribute('transform', 'scale(' + TILE_SCALE + ')')
 
             const visibleW = svgCanvas.getContentW() / TILE_SCALE
             const visibleH = svgCanvas.getContentH() / TILE_SCALE
@@ -245,38 +336,41 @@ export default {
 
             try {
                 for (const tile of tiles) {
-                    if (count >= MAX_TILES) {
-                        // limit reached
-                        break;
-                    }
+                    if (count >= MAX_TILES) break;
                     count++;
 
+                    // Skip the identity tile (0,0 aspect 0 etc) if we want to show the Master Group there?
+                    // Actually, if we show Master Group, we shouldn't draw a tile ON TOP of it.
+                    // But <use> is cheap. 
+                    // Let's draw ALL tiles in bgGroup. 
+                    // MasterGroup is on top.
+
                     const use = document.createElementNS(svgCanvas.NS.SVG, 'use')
-                    use.setAttribute('href', '#tessellation-prototile')
-                    use.setAttributeNS(svgCanvas.NS.XLINK, 'xlink:href', '#tessellation-prototile')
+                    use.setAttribute('href', '#tessellation-master-group')
+                    use.setAttributeNS(svgCanvas.NS.XLINK, 'xlink:href', '#tessellation-master-group')
 
                     const T = tile.T
-                    if (isNaN(T[0]) || isNaN(T[1])) {
-                        continue;
-                    }
+                    if (isNaN(T[0]) || isNaN(T[1])) continue;
 
                     const transform = 'matrix(' + T[0] + ',' + T[3] + ',' + T[1] + ',' + T[4] + ',' + T[2] + ',' + T[5] + ')'
                     use.setAttribute('transform', transform)
 
-                    // Checkerboard coloring
-                    if (tile.aspect % 2 === 0) {
-                        use.setAttribute('fill', '#ffe0e0')
-                    } else {
-                        use.setAttribute('fill', '#e0e0ff')
-                    }
+                    // Colorizing <use> of a Group is tricky if the group has own colors.
+                    // But we can set opacity or filter?
+                    // For now simple reflection.
 
-                    group.appendChild(use)
+                    // Checkerboard tinting via separate rect?
+                    // Or just let user draw.
+
+                    bgGroup.appendChild(use)
                 }
             } catch (e) {
                 console.error('Error generating tiles:', e);
             }
 
-            svgCanvas.call('changed', [group])
+            // Move any new drawing elements into master group???
+            // This requires hooking 'selected' or 'drawn' event.
+            // For now, this function just sets up the stage.
         }
 
         return {
