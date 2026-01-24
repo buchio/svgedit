@@ -557,6 +557,7 @@ export class Segment {
     this.ctrlpts = null
     this.ptgrip = null
     this.segsel = null
+    this.locked = false
   }
 
   /**
@@ -641,6 +642,21 @@ export class Segment {
       }
       // this.segsel.setAttribute('display', y ? 'inline' : 'none');
     }
+    if (this.locked && this.ptgrip) {
+      this.ptgrip.setAttribute('stroke', '#FF0000')
+    }
+  }
+
+  /**
+   * @param {boolean} val
+   * @returns {void}
+   */
+  setLocked(val) {
+    this.locked = val
+    if (this.ptgrip) {
+      this.ptgrip.setAttribute('stroke', val ? '#FF0000' : (this.selected ? '#0FF' : '#00F'))
+    }
+    this.update(true)
   }
 
   /**
@@ -649,6 +665,7 @@ export class Segment {
    * @returns {void}
    */
   move (dx, dy) {
+    if (this.locked) { return }
     const { item } = this
 
     item.x += dx
@@ -672,7 +689,7 @@ export class Segment {
       replacePathSegMethod(this.next.type, this.next.index, ptObjToArrMethod(this.next.type, next))
     }
 
-    if (this.mate) {
+    if (this.mate && !this.mate.locked) {
       // The last point of a closed subpath has a 'mate',
       // which is the 'M' segment of the subpath
       const { item: itm } = this.mate
@@ -805,6 +822,17 @@ export class Path {
       const segment = new Segment(i, item)
       segment.path = this
       this.segs.push(segment)
+    }
+
+    // Initialize locked state from 'data-locked' attribute
+    const lockedStr = this.elem.getAttribute('data-locked')
+    if (lockedStr) {
+      const lockedIndices = lockedStr.split(',').map(Number)
+      lockedIndices.forEach(index => {
+        if (this.segs[index]) {
+          this.segs[index].locked = true
+        }
+      })
     }
 
     const { segs } = this
@@ -1027,6 +1055,37 @@ export class Path {
     if (svgCanvas.getLinkControlPts()) {
       seg.setLinked(this.dragctrl)
     }
+  }
+
+  /**
+   * @param {Integer} index
+   * @param {boolean} locked
+   * @returns {void}
+   */
+  setSegLocked(index, locked) {
+    this.segs[index].setLocked(locked)
+
+    // Update 'data-locked' attribute
+    const lockedIndices = []
+    this.segs.forEach(seg => {
+      if (seg.locked) {
+        lockedIndices.push(seg.index)
+      }
+    })
+
+    if (lockedIndices.length > 0) {
+      this.elem.setAttribute('data-locked', lockedIndices.join(','))
+    } else {
+      this.elem.removeAttribute('data-locked')
+    }
+  }
+
+  /**
+   * @param {Integer} index
+   * @returns {void}
+   */
+  toggleSegLocked(index) {
+    this.setSegLocked(index, !this.segs[index].locked)
   }
 
   /**

@@ -185,6 +185,9 @@ const mouseMoveEvent = (evt) => {
         moveSelectionThresholdReached = moveSelectionThresholdReached || deltaThresholdReached
 
         if (moveSelectionThresholdReached) {
+          if (selectedElements.some(el => el.getAttribute('data-element-locked') === 'true')) {
+            return
+          }
           selectedElements.forEach((el) => {
             if (el) {
               updateTransformList(svgRoot, el, dx, dy)

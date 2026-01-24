@@ -58,6 +58,7 @@ class Editor extends EditorStartup {
     this.title = 'untitled.svg'
 
     this.svgCanvas = null
+    this.isLoading = false
     this.$click = $click
     this.isReady = false
     this.customExportImage = false
@@ -333,7 +334,9 @@ class Editor extends EditorStartup {
    * @returns {void}
    */
   loadSvgString (str, { noAlert } = {}) {
+    this.isLoading = true
     const success = this.svgCanvas.setSvgString(str) !== false
+    this.isLoading = false
     if (success) {
       this.updateCanvas()
       return
@@ -797,6 +800,46 @@ class Editor extends EditorStartup {
    */
   afterClear (win) {
     this.svgCanvas.runExtensions('afterClear')
+    if (!this.isLoading) {
+      this.drawRegularPolygon()
+    }
+  }
+
+  /**
+   * Draw a regular polygon on the canvas
+   * @param {number} [sides=7] - Number of sides
+   * @param {number} [cx=320] - Center X coordinate
+   * @param {number} [cy=240] - Center Y coordinate
+   * @param {number} [r=100] - Radius
+   * @returns {void}
+   */
+  drawRegularPolygon(sides = 7, cx = 320, cy = 240, r = 100) {
+    let pathData = ''
+
+    for (let i = 0; i < sides; i++) {
+      const angle = (2 * Math.PI * i / sides) - Math.PI / 2 // start from top
+      const x = cx + r * Math.cos(angle)
+      const y = cy + r * Math.sin(angle)
+      if (i === 0) {
+        pathData += `M ${x} ${y} `
+      } else {
+        pathData += `L ${x} ${y} `
+      }
+    }
+    pathData += 'Z'
+
+    const layer = this.svgCanvas.getCurrentDrawing().getCurrentLayer()
+    if (layer) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+      path.setAttribute('d', pathData)
+      path.setAttribute('fill', '#ffcccc')
+      path.setAttribute('stroke', '#000000')
+      path.setAttribute('stroke-width', '2')
+      path.setAttribute('id', this.svgCanvas.getNextId())
+      path.setAttribute('data-locked', '0')
+      path.setAttribute('data-element-locked', 'true')
+      layer.appendChild(path)
+    }
   }
 
   /**

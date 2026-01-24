@@ -508,9 +508,14 @@ class PathActions {
     if (id.startsWith('pathpointgrip_')) {
       // Select this point
       curPt = path.cur_pt = Number.parseInt(id.slice(14))
-      path.dragging = [startX, startY]
       const seg = path.segs[curPt]
 
+      // Don't allow dragging control points of locked segments
+      if (seg.locked) {
+        return undefined
+      }
+      path.dragging = [startX, startY]
+      
       // only clear selection if shift is not pressed (otherwise, add
       // node to selection)
       if (!evt.shiftKey) {
@@ -524,10 +529,16 @@ class PathActions {
         path.addPtsToSelection(curPt)
       }
     } else if (id.startsWith('ctrlpointgrip_')) {
-      path.dragging = [startX, startY]
-
       const parts = id.split('_')[1].split('c')
       curPt = Number(parts[0])
+      const seg = path.segs[curPt]
+
+      // Don't allow dragging control points of locked segments
+      if (seg.locked) {
+        return undefined
+      }
+
+      path.dragging = [startX, startY]
       const ctrlNum = Number(parts[1])
       path.selectPt(curPt, ctrlNum)
     }

@@ -120,7 +120,13 @@ export class Selector {
     const elem = this.selectedElement
     this.hasGrips = show
     if (elem && show) {
-      this.selectorGroup.append(selectModule.getSelectorManager().selectorGripsGroup)
+      const selectorGripsGroup = selectModule.getSelectorManager().selectorGripsGroup;
+      if (elem.getAttribute('data-element-locked') === 'true') {
+        // Hide grips if locked
+        selectorGripsGroup.setAttribute('display', 'none')
+        return
+      }
+      this.selectorGroup.append(selectorGripsGroup)
       Selector.updateGripCursors(getRotationAngle(elem))
     }
   }

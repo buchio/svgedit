@@ -164,7 +164,7 @@ class SvgCanvas {
       // Default configuration options
       show_outside_canvas: true,
       selectNew: true,
-      dimensions: [640, 480]
+      dimensions: [1920, 1440]
     }
     // Update config with new one if given
     if (config) {
